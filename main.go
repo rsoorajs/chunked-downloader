@@ -20,9 +20,10 @@ const defaultNWorkers = 16
 
 func main() {
 	url := flag.String("url", "", "URL of file to download")
+	outname := flag.String("o", "", "Output filename")
 	verify := flag.Bool("verify", false, "Whether to verify an MD5 ETag for the file")
 	flag.Parse()
-	if *url == "" {
+	if *url == "" || *outname == "" {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -31,7 +32,11 @@ func main() {
 		NWorkers:   defaultNWorkers,
 		VerifyETag: *verify,
 	}
-	err := client.GetFile(*url)
+	outfile, err := os.Create(*outname)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = client.GetFile(*url, outfile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,7 +49,7 @@ type ChunkClient struct {
 	NWorkers   int
 }
 
-func (c *ChunkClient) GetFile(url string) error {
+func (c *ChunkClient) GetFile(url string, out *os.File) error {
 	res, err := c.Head(url)
 	if err != nil {
 		return err
@@ -55,19 +60,14 @@ func (c *ChunkClient) GetFile(url string) error {
 	}
 	etag := res.Header.Get("ETag")
 
-	f, err := os.Create("output")
-	if err != nil {
-		return err
-	}
-
-	err = c.getAllChunks(f, url, length)
+	err = c.getAllChunks(out, url, length)
 	if err != nil {
 		return err
 	}
 
 	if etag != "" {
 		hash := md5.New()
-		if _, err := io.Copy(hash, f); err != nil {
+		if _, err := io.Copy(hash, out); err != nil {
 			return err
 		}
 		if etag != hex.EncodeToString(hash.Sum(nil)) {
@@ -78,7 +78,7 @@ func (c *ChunkClient) GetFile(url string) error {
 	return nil
 }
 
-func (c *ChunkClient) getAllChunks(outfile *os.File, url string, length int64) error {
+func (c *ChunkClient) getAllChunks(out *os.File, url string, length int64) error {
 	tokens := make(chan struct{}, c.NWorkers)
 	errs := make(chan error, c.NWorkers)
 	nChunks := int(length / int64(c.ChunkSize))
@@ -94,18 +94,23 @@ func (c *ChunkClient) getAllChunks(outfile *os.File, url string, length int64) e
 		tokens <- struct{}{}
 		offset := i * c.ChunkSize
 		go func() {
+			defer func() {
+				<-tokens
+			}()
 			res, err := c.getChunk(url, offset)
 			if err != nil {
 				errs <- err
+				return
 			}
 			if res.StatusCode != http.StatusPartialContent {
 				errs <- fmt.Errorf("chunk at offset %d failed with %d", offset, http.StatusPartialContent)
+				return
 			}
-			_, err = io.Copy(&chunkWriter{outfile, int64(offset)}, res.Body)
+			_, err = io.Copy(&chunkWriter{out, int64(offset)}, res.Body)
 			if err != nil {
 				errs <- err
+				return
 			}
-			<-tokens
 		}()
 		// Check if there have been any errors before proceeding to the next
 		// iteration.
