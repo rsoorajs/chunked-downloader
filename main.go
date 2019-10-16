@@ -38,35 +38,14 @@ func (c *ChunkClient) GetFile(url string) error {
 	}
 	etag := res.Header.Get("ETag")
 
-	tokens := make(chan struct{}, c.NWorkers)
 	f, err := os.Create("output")
 	if err != nil {
 		return err
 	}
 
-	nChunks := int(length / int64(c.ChunkSize))
-	for i := 0; i <= nChunks; i++ {
-		tokens <- struct{}{}
-		offset := i * c.ChunkSize
-		go func() {
-			res, err := c.getChunk(url, offset, offset+c.ChunkSize-1)
-			if err != nil {
-				panic(err)
-			}
-			if res.StatusCode != http.StatusPartialContent {
-				panic(fmt.Errorf("chunk at offset %d failed with %d", offset, http.StatusPartialContent))
-			}
-			_, err = io.Copy(&chunkWriter{f, int64(offset)}, res.Body)
-			if err != nil {
-				panic(err)
-			}
-			<-tokens
-		}()
-	}
-
-	// Ensure that all workers have finished by collecting all tokens.
-	for i := 0; i < c.NWorkers; i++ {
-		tokens <- struct{}{}
+	err = c.getAllChunks(f, url, length)
+	if err != nil {
+		return err
 	}
 
 	if etag != "" {
@@ -82,12 +61,52 @@ func (c *ChunkClient) GetFile(url string) error {
 	return nil
 }
 
-func (c *ChunkClient) getChunk(url string, offset int, limit int) (*http.Response, error) {
+func (c *ChunkClient) getAllChunks(outfile *os.File, url string, length int64) error {
+	tokens := make(chan struct{}, c.NWorkers)
+	errs := make(chan error, c.NWorkers)
+	nChunks := int(length / int64(c.ChunkSize))
+
+	defer func() {
+		// Allow all workers to complete before exiting.
+		for i := 0; i < c.NWorkers; i++ {
+			tokens <- struct{}{}
+		}
+	}()
+
+	for i := 0; i <= nChunks; i++ {
+		tokens <- struct{}{}
+		offset := i * c.ChunkSize
+		go func() {
+			res, err := c.getChunk(url, offset)
+			if err != nil {
+				errs <- err
+			}
+			if res.StatusCode != http.StatusPartialContent {
+				errs <- fmt.Errorf("chunk at offset %d failed with %d", offset, http.StatusPartialContent)
+			}
+			_, err = io.Copy(&chunkWriter{outfile, int64(offset)}, res.Body)
+			if err != nil {
+				errs <- err
+			}
+			<-tokens
+		}()
+		// Check if there have been any errors before proceeding to the next
+		// iteration.
+		select {
+		case err := <-errs:
+			return err
+		default:
+		}
+	}
+	return nil
+}
+
+func (c *ChunkClient) getChunk(url string, offset int) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return &http.Response{}, err
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, limit))
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, offset+c.ChunkSize-1))
 	return c.Do(req)
 }
 

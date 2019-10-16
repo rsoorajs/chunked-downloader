@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -42,8 +43,11 @@ func etagFileServer(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestGetChunk(t *testing.T) {
-	c := ChunkClient{Client: http.Client{}}
-	res, err := c.getChunk(ts.URL+testFile, 316882, 316929)
+	c := ChunkClient{
+		Client:    http.Client{},
+		ChunkSize: 48,
+	}
+	res, err := c.getChunk(ts.URL+testFile, 316882)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,5 +105,27 @@ func TestChunkedGetTLS(t *testing.T) {
 	err := c.GetFile(tlsServer.URL + testFile)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestChunkError(t *testing.T) {
+	errServer := httptest.NewServer(
+		// Simulate an error on the third chunk.
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.Header.Get("Range"), "512") {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			etagFileServer(w, r)
+		}),
+	)
+	c := ChunkClient{
+		Client:    http.Client{},
+		NWorkers:  nWorkers,
+		ChunkSize: 256,
+	}
+	err := c.GetFile(errServer.URL + testFile)
+	if !strings.Contains(err.Error(), "chunk at offset 512") {
+		t.Fatalf("Expected error on chunk 512 to be returned")
 	}
 }
