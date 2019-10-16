@@ -17,8 +17,13 @@ var ts *httptest.Server
 
 // Use a smaller file and smaller chunks for testing.
 const testIn = "/frankenstein.txt"
-const testOut = "tmp/out.txt"
 const testChunkSize = 256
+
+// Normally I would make ChunkClient accept an io.ReadWriter interface (instead
+// of the concreate type *os.File) and use a buffer for testing.
+// bytes.Buffer doesn't implement WriteAt, so I'm writing to a file in a tmp
+// directory instead.
+const testOut = "tmp/out.txt"
 
 func TestMain(m *testing.M) {
 	ts = httptest.NewServer(

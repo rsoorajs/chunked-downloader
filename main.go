@@ -12,7 +12,7 @@ import (
 	"os"
 )
 
-const defaultChunkSize = 100 * 1000
+const defaultChunkSize = 512 * 1000
 
 // Number of chunks to download at a time.
 // Constrained by the number of open network connections the OS can support.
@@ -42,6 +42,8 @@ func main() {
 	}
 }
 
+// ChunkClient makes requests to download a large file over multiple HTTP/HTTPS
+// requests.
 type ChunkClient struct {
 	http.Client
 	ChunkSize  int
@@ -49,6 +51,8 @@ type ChunkClient struct {
 	NWorkers   int
 }
 
+// GetFile makes chunked request to download the file hosted at `url` to an
+// output file.
 func (c *ChunkClient) GetFile(url string, out *os.File) error {
 	res, err := c.Head(url)
 	if err != nil {
@@ -78,6 +82,8 @@ func (c *ChunkClient) GetFile(url string, out *os.File) error {
 	return nil
 }
 
+// getAllChunks implements a worker pool to do the work of downloading a file
+// of a known length in chunks.
 func (c *ChunkClient) getAllChunks(out *os.File, url string, length int64) error {
 	tokens := make(chan struct{}, c.NWorkers)
 	errs := make(chan error, c.NWorkers)
@@ -123,6 +129,7 @@ func (c *ChunkClient) getAllChunks(out *os.File, url string, length int64) error
 	return nil
 }
 
+// getChunk requests a single chunk of a large file and returns the response.
 func (c *ChunkClient) getChunk(url string, offset int) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
