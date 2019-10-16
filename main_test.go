@@ -15,7 +15,9 @@ import (
 
 var ts *httptest.Server
 
+// Use a smaller file and smaller chunks for testing.
 const testFile = "/frankenstein.txt"
+const testChunkSize = 256
 
 func TestMain(m *testing.M) {
 	ts = httptest.NewServer(
@@ -44,7 +46,6 @@ func etagFileServer(w http.ResponseWriter, r *http.Request) {
 
 func TestGetChunk(t *testing.T) {
 	c := ChunkClient{
-		Client:    http.Client{},
 		ChunkSize: 48,
 	}
 	res, err := c.getChunk(ts.URL+testFile, 316882)
@@ -65,8 +66,8 @@ func TestChunkedGet(t *testing.T) {
 	// For testing, use a smaller file and a smaller chunk size.
 	c := ChunkClient{
 		Client:    http.Client{},
-		NWorkers:  nWorkers,
-		ChunkSize: 256,
+		NWorkers:  defaultNWorkers,
+		ChunkSize: testChunkSize,
 	}
 	err := c.GetFile(ts.URL + testFile)
 	if err != nil {
@@ -77,8 +78,8 @@ func TestChunkedGet(t *testing.T) {
 func TestChunkedGetVerifyETag(t *testing.T) {
 	c := ChunkClient{
 		Client:     http.Client{},
-		NWorkers:   nWorkers,
-		ChunkSize:  256,
+		NWorkers:   defaultNWorkers,
+		ChunkSize:  testChunkSize,
 		VerifyETag: true,
 	}
 	err := c.GetFile(ts.URL + testFile)
@@ -98,8 +99,8 @@ func TestChunkedGetTLS(t *testing.T) {
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 			},
 		},
-		NWorkers:   nWorkers,
-		ChunkSize:  256,
+		NWorkers:   defaultNWorkers,
+		ChunkSize:  testChunkSize,
 		VerifyETag: true,
 	}
 	err := c.GetFile(tlsServer.URL + testFile)
@@ -121,8 +122,8 @@ func TestChunkError(t *testing.T) {
 	)
 	c := ChunkClient{
 		Client:    http.Client{},
-		NWorkers:  nWorkers,
-		ChunkSize: 256,
+		NWorkers:  defaultNWorkers,
+		ChunkSize: testChunkSize,
 	}
 	err := c.GetFile(errServer.URL + testFile)
 	if !strings.Contains(err.Error(), "chunk at offset 512") {

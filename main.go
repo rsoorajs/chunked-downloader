@@ -4,20 +4,37 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 )
 
-const chunkSize = 256
+const defaultChunkSize = 100 * 1000
 
 // Number of chunks to download at a time.
 // Constrained by the number of open network connections the OS can support.
-const nWorkers = 16
+const defaultNWorkers = 16
 
 func main() {
-	fmt.Println("vim-go")
+	url := flag.String("url", "", "URL of file to download")
+	verify := flag.Bool("verify", false, "Whether to verify an MD5 ETag for the file")
+	flag.Parse()
+	if *url == "" {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+	client := ChunkClient{
+		ChunkSize:  defaultChunkSize,
+		NWorkers:   defaultNWorkers,
+		VerifyETag: *verify,
+	}
+	err := client.GetFile(*url)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 type ChunkClient struct {
